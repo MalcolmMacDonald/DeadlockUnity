@@ -1,0 +1,39 @@
+namespace ValveFileImporter.ValveResourceFormat.Resource
+{
+    /// <summary>
+    ///     Resource file block types.
+    /// </summary>
+    public enum BlockType : uint
+    {
+#pragma warning disable CS1591
+        Undefined = 0,
+
+        RERL = 'R' | 'E' << 8 | 'R' << 16 | 'L' << 24,
+        REDI = 'R' | 'E' << 8 | 'D' << 16 | 'I' << 24,
+        RED2 = 'R' | 'E' << 8 | 'D' << 16 | '2' << 24,
+        NTRO = 'N' | 'T' << 8 | 'R' << 16 | 'O' << 24,
+        DATA = 'D' | 'A' << 8 | 'T' << 16 | 'A' << 24,
+        VBIB = 'V' | 'B' << 8 | 'I' << 16 | 'B' << 24,
+        VXVS = 'V' | 'X' << 8 | 'V' << 16 | 'S' << 24,
+        SNAP = 'S' | 'N' << 8 | 'A' << 16 | 'P' << 24,
+        CTRL = 'C' | 'T' << 8 | 'R' << 16 | 'L' << 24,
+        MDAT = 'M' | 'D' << 8 | 'A' << 16 | 'T' << 24,
+        MRPH = 'M' | 'R' << 8 | 'P' << 16 | 'H' << 24,
+        MBUF = 'M' | 'B' << 8 | 'U' << 16 | 'F' << 24,
+        ANIM = 'A' | 'N' << 8 | 'I' << 16 | 'M' << 24,
+        ASEQ = 'A' | 'S' << 8 | 'E' << 16 | 'Q' << 24,
+        AGRP = 'A' | 'G' << 8 | 'R' << 16 | 'P' << 24,
+        PHYS = 'P' | 'H' << 8 | 'Y' << 16 | 'S' << 24,
+        INSG = 'I' | 'N' << 8 | 'S' << 16 | 'G' << 24,
+        SrMa = 'S' | 'r' << 8 | 'M' << 16 | 'a' << 24,
+        LaCo = 'L' | 'a' << 8 | 'C' << 16 | 'o' << 24,
+        STAT = 'S' | 'T' << 8 | 'A' << 16 | 'T' << 24,
+        SPRV = 'S' | 'P' << 8 | 'R' << 16 | 'V' << 24,
+        FLCI = 'F' | 'L' << 8 | 'C' << 16 | 'I' << 24,
+        DSTF = 'D' | 'S' << 8 | 'T' << 16 | 'F' << 24,
+        TBUF = 'T' | 'B' << 8 | 'U' << 16 | 'F' << 24,
+        MVTX = 'M' | 'V' << 8 | 'T' << 16 | 'X' << 24,
+        MIDX = 'M' | 'I' << 8 | 'D' << 16 | 'X' << 24,
+#pragma warning restore CS1591
+    }
+}

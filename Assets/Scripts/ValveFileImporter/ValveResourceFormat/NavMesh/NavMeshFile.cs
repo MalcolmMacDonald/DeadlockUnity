@@ -1,0 +1,322 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using UnityEngine;
+using ValveFileImporter.ValveResourceFormat.KeyValues;
+using ValveFileImporter.ValveResourceFormat.Utils;
+using Debug = System.Diagnostics.Debug;
+
+namespace ValveFileImporter.ValveResourceFormat.NavMesh
+{
+    /// <summary>
+    ///     Represents a navigation mesh file.
+    /// </summary>
+    public class NavMeshFile
+    {
+        /// <summary>
+        ///     Magic number for navigation mesh files.
+        /// </summary>
+        public const uint MAGIC = 0xFEEDFACE;
+
+        private readonly Dictionary<byte, List<NavMeshArea>> HullAreas = new();
+
+        /// <summary>
+        ///     Gets or sets the file version.
+        /// </summary>
+        public uint Version { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the sub-version.
+        /// </summary>
+        public uint SubVersion { get; set; }
+
+        /// <summary>
+        ///     Gets the navigation mesh areas indexed by area ID.
+        /// </summary>
+        public Dictionary<uint, NavMeshArea> Areas { get; private set; }
+
+        /// <summary>
+        ///     Gets the ladders in the navigation mesh.
+        /// </summary>
+        public NavMeshLadder[] Ladders { get; private set; }
+
+        /// <summary>
+        ///     Gets whether the navigation mesh has been analyzed.
+        /// </summary>
+        public bool IsAnalyzed { get; private set; }
+
+        /// <summary>
+        ///     Gets the generation parameters.
+        /// </summary>
+        public NavMeshGenerationParams GenerationParams { get; private set; }
+
+        /// <summary>
+        ///     Gets or sets custom data associated with the navigation mesh.
+        /// </summary>
+        public KVObject CustomData { get; set; }
+
+        /// <summary>
+        ///     Reads the navigation mesh from a file.
+        /// </summary>
+        public void Read(string filename)
+        {
+            using var fs = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            Read(fs);
+        }
+
+        /// <summary>
+        ///     Reads the navigation mesh from a stream.
+        /// </summary>
+        public void Read(Stream stream)
+        {
+            using var binaryReader = new BinaryReader(stream, Encoding.UTF8, true);
+            Read(binaryReader);
+        }
+
+        /// <summary>
+        ///     Reads the navigation mesh from a binary reader.
+        /// </summary>
+        public void Read(BinaryReader binaryReader)
+        {
+            var magic = binaryReader.ReadUInt32();
+            if (magic != MAGIC)
+            {
+                throw new UnexpectedMagicException($"Unexpected magic, expected {MAGIC:X}", magic, nameof(magic));
+            }
+
+            var version = binaryReader.ReadUInt32();
+            if (version < 30 || version > 35)
+            {
+                throw new UnexpectedMagicException("Unsupported nav version", version, nameof(version));
+            }
+
+            Areas = new Dictionary<uint, NavMeshArea>();
+            HullAreas.Clear();
+
+            Version = version;
+            SubVersion = binaryReader.ReadUInt32();
+
+            var unk1 = binaryReader.ReadUInt32();
+            IsAnalyzed = (unk1 & 0x00000001) > 0;
+
+            Vector3[][] polygons = null;
+            if (Version >= 31)
+            {
+                polygons = ReadPolygons(binaryReader);
+            }
+
+            if (Version >= 32)
+            {
+                var unk2 = binaryReader.ReadUInt32();
+                Debug.Assert(unk2 == 0);
+            }
+
+            if (Version >= 35)
+            {
+                var unkCount1 = binaryReader.ReadUInt32();
+
+                for (var i = 0; i < unkCount1; i++)
+                {
+                    //TODO: Figure out what's stored here (dl_midtown)
+                    binaryReader.ReadNullTermString(Encoding.ASCII);
+                    binaryReader.BaseStream.Position += 48;
+                }
+            }
+
+            ReadAreas(binaryReader, polygons);
+
+            ReadLadders(binaryReader);
+
+            var unkCount2 = binaryReader.ReadInt32();
+            binaryReader.BaseStream.Position += sizeof(float) * unkCount2 * 18; //seem to be vector3s
+
+            GenerationParams = new NavMeshGenerationParams();
+            GenerationParams.Read(binaryReader, this);
+
+            ReadCustomData(binaryReader);
+
+            Debug.Assert(binaryReader.BaseStream.Position == binaryReader.BaseStream.Length);
+        }
+
+        private void ReadCustomData(BinaryReader binaryReader)
+        {
+            //MALCOLM: Disabled as KV3 reading is not implemented
+            /*if (SubVersion > 0)
+            {
+                while (binaryReader.ReadByte() == 0)
+                {
+                    //Reading past 0x00 padding
+                }
+
+                var kv3 = new BinaryKV3();
+                kv3.Offset = (uint)(binaryReader.BaseStream.Position - 1);
+                kv3.Size = (uint)(binaryReader.BaseStream.Length - kv3.Offset);
+                kv3.Read(binaryReader);
+
+                CustomData = kv3.Data;
+            }*/
+        }
+
+        private void ReadLadders(BinaryReader binaryReader)
+        {
+            var ladderCount = binaryReader.ReadUInt32();
+            Ladders = new NavMeshLadder[ladderCount];
+            for (var i = 0; i < ladderCount; i++)
+            {
+                var ladder = new NavMeshLadder();
+                ladder.Read(binaryReader, this);
+                Ladders[i] = ladder;
+            }
+        }
+
+        private void ReadAreas(BinaryReader binaryReader, Vector3[][] polygons)
+        {
+            var areaCount = binaryReader.ReadUInt32();
+            for (var i = 0; i < areaCount; i++)
+            {
+                var area = new NavMeshArea();
+                area.Read(binaryReader, this, polygons);
+                AddArea(area);
+            }
+        }
+
+        private Vector3[][] ReadPolygons(BinaryReader binaryReader)
+        {
+            var cornerCount = binaryReader.ReadUInt32();
+            var corners = new Vector3[cornerCount];
+            for (var i = 0; i < cornerCount; i++)
+            {
+                corners[i] = new Vector3(binaryReader.ReadSingle(), binaryReader.ReadSingle(), binaryReader.ReadSingle());
+            }
+
+            var polygonCount = binaryReader.ReadUInt32();
+            var polygons = new Vector3[polygonCount][];
+            for (uint i = 0; i < polygonCount; i++)
+            {
+                polygons[i] = ReadPolygon(binaryReader, corners);
+            }
+
+            return polygons;
+        }
+
+        private Vector3[] ReadPolygon(BinaryReader binaryReader, Vector3[] corners)
+        {
+            var cornerCount = binaryReader.ReadByte();
+
+            var polygon = new Vector3[cornerCount];
+            for (var i = 0; i < cornerCount; i++)
+            {
+                var cornerIndex = binaryReader.ReadUInt32();
+                polygon[i] = corners[cornerIndex];
+            }
+
+            if (Version >= 35)
+            {
+                var unk = binaryReader.ReadUInt32();
+                //Debug.Assert(unk == -1); // TODO: Deadlock dl_mid map has these values
+            }
+
+            return polygon;
+        }
+
+        private void AddArea(NavMeshArea area)
+        {
+            Areas[area.AreaId] = area;
+
+            if (HullAreas.TryGetValue(area.HullIndex, out var areas))
+            {
+                areas.Add(area);
+            }
+            else
+            {
+                HullAreas[area.HullIndex] = new List<NavMeshArea> { area };
+            }
+        }
+
+        /// <summary>
+        ///     Gets all navigation mesh areas for the specified hull index.
+        /// </summary>
+        public List<NavMeshArea> GetHullAreas(byte hullIndex)
+        {
+            return HullAreas.GetValueOrDefault(hullIndex);
+        }
+
+        /// <summary>
+        ///     Gets a navigation mesh area by its identifier.
+        /// </summary>
+        public NavMeshArea GetArea(uint areaId)
+        {
+            return Areas.GetValueOrDefault(areaId);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        ///     Returns a formatted summary of the navigation mesh including version, area count, and generation parameters.
+        /// </remarks>
+        public override string ToString()
+        {
+            var stringBuilder = new StringBuilder();
+
+            stringBuilder.AppendLine($"Version: {Version}");
+            stringBuilder.AppendLine($"Sub version: {SubVersion}");
+            stringBuilder.AppendLine($"Analyzed: {IsAnalyzed}");
+            stringBuilder.AppendLine($"Number of areas: {Areas?.Count ?? 0}");
+            stringBuilder.AppendLine($"Number of ladders: {Ladders?.Length ?? 0}");
+
+            if (GenerationParams != null)
+            {
+                stringBuilder.AppendLine();
+                stringBuilder.AppendLine($"Nav Gen Version: {GenerationParams.NavGenVersion}");
+                stringBuilder.AppendLine($"Use Project Defaults: {GenerationParams.UseProjectDefaults}");
+                stringBuilder.AppendLine($"Tile Size: {GenerationParams.TileSize}");
+                stringBuilder.AppendLine($"Cell Size: {GenerationParams.CellSize}");
+                stringBuilder.AppendLine($"Cell Height: {GenerationParams.CellHeight}");
+                stringBuilder.AppendLine($"Min Region Size: {GenerationParams.MinRegionSize}");
+                stringBuilder.AppendLine($"Merged Region Size: {GenerationParams.MergedRegionSize}");
+                stringBuilder.AppendLine($"Mesh Sample Distance: {GenerationParams.MeshSampleDistance}");
+                stringBuilder.AppendLine($"Max Sample Error: {GenerationParams.MaxSampleError}");
+                stringBuilder.AppendLine($"Max Edge Length: {GenerationParams.MaxEdgeLength}");
+                stringBuilder.AppendLine($"Max Edge Error: {GenerationParams.MaxEdgeError}");
+                stringBuilder.AppendLine($"Verts Per Poly: {GenerationParams.VertsPerPoly}");
+
+                if (GenerationParams.NavGenVersion >= 7)
+                {
+                    stringBuilder.AppendLine($"Small Area On Edge Removal: {GenerationParams.SmallAreaOnEdgeRemoval}");
+                }
+
+                if (GenerationParams.NavGenVersion >= 12)
+                {
+                    stringBuilder.AppendLine($"Hull Preset Name: {GenerationParams.HullPresetName}");
+                    stringBuilder.AppendLine($"Hull Definitions File: {GenerationParams.HullDefinitionsFile}");
+                }
+
+                for (var i = 0; i < GenerationParams.HullCount; i++)
+                {
+                    var hull = GenerationParams.HullParams[i];
+                    stringBuilder.AppendLine();
+                    if (GenerationParams.NavGenVersion >= 9)
+                    {
+                        stringBuilder.AppendLine($"Hull {i} Enabled: {hull.Enabled}");
+                        stringBuilder.AppendLine($"Hull {i} Short Height Enabled: {hull.ShortHeightEnabled}");
+                        stringBuilder.AppendLine($"Hull {i} Short Height: {hull.ShortHeight}");
+                    }
+
+                    if (GenerationParams.NavGenVersion >= 11)
+                    {
+                        stringBuilder.AppendLine($"Hull {i} Border Erosion: {hull.BorderErosion}");
+                    }
+
+                    stringBuilder.AppendLine($"Hull {i} Radius: {hull.Radius}");
+                    stringBuilder.AppendLine($"Hull {i} Height: {hull.Height}");
+                    stringBuilder.AppendLine($"Hull {i} Max Climb: {hull.MaxClimb}");
+                    stringBuilder.AppendLine($"Hull {i} Max Slope: {hull.MaxSlope}");
+                    stringBuilder.AppendLine($"Hull {i} Max Jump Down Dist: {hull.MaxJumpDownDist}");
+                    stringBuilder.AppendLine($"Hull {i} Max Jump Horiz Dist Base: {hull.MaxJumpHorizDistBase}");
+                    stringBuilder.AppendLine($"Hull {i} Max Jump Up Dist: {hull.MaxJumpUpDist}");
+                }
+            }
+
+            return stringBuilder.ToString();
+        }
+    }
+}
