@@ -38,37 +38,34 @@ public class PlayerController : MonoBehaviour
     private void Start()
     {
         yaw = playerRigidbody.rotation.eulerAngles.y;
+        WebGLInput.stickyCursorLock = false;
     }
 
     // Update is called once per frame
     private void Update()
     {
-        //handle mouse lock
         if (Input.GetMouseButtonDown(0))
         {
-            if (Cursor.lockState != CursorLockMode.Locked)
-            {
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
-                playerRigidbody.isKinematic = false;
-                return;
-            }
-
-            StopAllCoroutines();
-            StartCoroutine(HandleThrowingUrn());
+            Cursor.lockState = CursorLockMode.Locked;
         }
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-            playerRigidbody.isKinematic = true;
         }
 
         if (Cursor.lockState != CursorLockMode.Locked)
         {
             return;
         }
+
+        //handle mouse lock
+        if (Input.GetMouseButtonDown(0))
+        {
+            StopAllCoroutines();
+            StartCoroutine(HandleThrowingUrn());
+        }
+
 
         HandleLooking();
         HandleMovement();
